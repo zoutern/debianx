@@ -70,6 +70,7 @@ systemd 模式验证：`docker exec debianx systemctl is-system-running` 返回 
 直接填镜像 `ghcr.io/zoutern/debianx:latest` 即可，无需特权：
 
 - 平台是 k8s 环境，entrypoint 会自动进入直跑模式（日志有 `[entrypoint] 进入直跑模式`）；
+- **启动命令(Command/Args)留空即可**，填了也会被入口包装忽略（防止平台默认填 `/sbin/init` 导致 systemd 崩溃循环）——运行模式完全由 entrypoint 自动探测；
 - 容器健康运行后，平台的**网页终端 / 文件管理**即可正常使用（镜像内含 `/bin/sh`、`/bin/bash`）；
 - SSH 端口 22，隧道日志看容器日志或 `/var/log/tun.log`；
 - 若平台把端口映射到别的端口，SSH 就连映射后的那个。

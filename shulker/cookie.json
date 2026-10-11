@@ -1,0 +1,53 @@
+[
+  {
+    "domain": "shulker.in",
+    "expirationDate": 1820676321,
+    "hostOnly": true,
+    "httpOnly": false,
+    "name": "ann_dismissed",
+    "path": "/panel/dashboard/get-server",
+    "sameSite": "lax",
+    "secure": false,
+    "session": false,
+    "storeId": "0",
+    "value": "4path=/"
+  },
+  {
+    "domain": "shulker.in",
+    "hostOnly": true,
+    "httpOnly": false,
+    "name": "PHPSESSID",
+    "path": "/",
+    "sameSite": "unspecified",
+    "secure": false,
+    "session": true,
+    "storeId": "0",
+    "value": "2afa963a90b6c08181746083c614f898"
+  },
+  {
+    "domain": ".shulker.in",
+    "expirationDate": 1794320918.422385,
+    "hostOnly": false,
+    "httpOnly": true,
+    "name": "shulker_session",
+    "path": "/",
+    "sameSite": "unspecified",
+    "secure": false,
+    "session": false,
+    "storeId": "0",
+    "value": "5a130e10fbf6%3A36800e3d82d773ee21fb8042d8b720005527fa59b3aea5e1ddd0eb0cd4ba05d0"
+  },
+  {
+    "domain": ".shulker.in",
+    "expirationDate": 1794320918.422436,
+    "hostOnly": false,
+    "httpOnly": true,
+    "name": "rememberme",
+    "path": "/",
+    "sameSite": "unspecified",
+    "secure": false,
+    "session": false,
+    "storeId": "0",
+    "value": "1ecb65e08cbe%3Ad5c33de5a5e506f4e3f207a752cb5f9b91be37971210eb25f83aced38e9a4228"
+  }
+]

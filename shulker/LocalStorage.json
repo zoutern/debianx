@@ -1,0 +1,18 @@
+{
+  "format": "cookie-storage-toolkit-storage",
+  "version": 1,
+  "origin": "https://shulker.in",
+  "exportedAt": "2026-10-11T14:46:43.470Z",
+  "items": [
+    {
+      "type": "local",
+      "key": "trancy-mode",
+      "value": "prod"
+    },
+    {
+      "type": "session",
+      "key": "__imt_handshake_page_id",
+      "value": "c5900568-797f-4acf-a95f-590059cc6a54"
+    }
+  ]
+}
