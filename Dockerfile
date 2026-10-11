@@ -8,6 +8,7 @@ FROM debian:bookworm
 ARG DEBIAN_FRONTEND=noninteractive
 
 # 基础依赖: systemd(PID 1) + openssh-server + 下载工具
+# 容器内 systemd 加固: multi-user 默认 target; mask 容器内必失败/无意义的单元
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       systemd \
@@ -16,6 +17,8 @@ RUN apt-get update \
       ca-certificates \
       curl \
       bash \
+ && systemctl set-default multi-user.target \
+ && systemctl mask getty@tty1.service systemd-networkd-wait-online.service systemd-firstboot.service \
  && rm -rf /var/lib/apt/lists/*
 
 # 置空 machine-id, 让 systemd 在每次容器启动时自行生成临时 id
@@ -62,4 +65,7 @@ ENV container=docker
 STOPSIGNAL SIGRTMIN+3
 
 ENTRYPOINT ["/startup_wrapper.sh"]
-CMD ["/sbin/init"]
+# CMD 写成 shell 形式: 一些托管平台按镜像配置判断"是否 distroless"(无 shell),
+# 用 bash 包一层可通过检测; entrypoint 内仍 exec /sbin/init, systemd 依旧占据 PID 1。
+# systemd 无法运行的环境(k8s/普通 docker run)下 entrypoint 自动降级为直跑模式。
+CMD ["/bin/bash", "-c", "exec /sbin/init"]

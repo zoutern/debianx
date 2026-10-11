@@ -1,11 +1,13 @@
 #!/bin/sh
 # 容器引导脚本(由 /startup_wrapper.sh exec 调用):
 #   1. 应用环境变量覆盖(root 公钥 / 隧道 Token)
-#   2. 准备 systemd / sshd 所需目录
-#   3. exec /sbin/init —— systemd 占据 PID 1, 由它拉起 ssh.service 与 tun.service
-# 覆盖了 CMD 时(如 docker run image bash)则直接执行该命令, 不启动 systemd。
+#   2. 探测 systemd 能否在本容器内运行:
+#        可运行   -> exec /sbin/init, systemd 以 PID 1 拉起 ssh/tun 两个服务
+#        不可运行 -> 直跑模式: tun 后台自动重启循环, sshd 前台占据 PID 1
+#   3. 覆盖了 CMD 时(如 docker run image bash)直接执行该命令, 不走以上逻辑
 
 DEFAULT_ROOT_PUBKEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBbOngF8zJjVVvAlDWjZnGE83jXrt3aDviPCqIIE5Ju6"
+TUN_BIN="/usr/local/lib/tun/tun"
 
 log() { printf '[entrypoint] %s\n' "$*"; }
 
@@ -34,17 +36,60 @@ if [ -n "${TUN_TOKEN:-}" ]; then
 fi
 
 # ---- 3. 目录准备 ----
-# /run/sshd: sshd 权限分离目录; /run/systemd/system: 供脚本判定 init 类型
-mkdir -p /run/sshd /run/systemd/system
+mkdir -p /run/sshd
+mkdir -p /run/systemd/system 2>/dev/null || true
 
-# ---- 4. 确保两个服务开机自启(enable 为离线操作, 幂等) ----
-systemctl enable ssh.service >/dev/null 2>&1 || true
-systemctl enable tun.service >/dev/null 2>&1 || true
+# ---- 4. 运行模式探测 ----
+# FORCE_SYSTEMD: 1=强制 systemd 模式, 0=强制直跑模式, 缺省 auto 自动探测
+MODE=""
+case "${FORCE_SYSTEMD:-auto}" in
+    1|true|yes|systemd)  MODE=systemd ;;
+    0|false|no|fallback) MODE=fallback ;;
+esac
+if [ -z "$MODE" ]; then
+    if [ -n "${KUBERNETES_SERVICE_HOST:-}" ]; then
+        MODE=fallback            # k8s/PaaS 平台无特权, systemd 起不来
+    elif [ ! -w /sys/fs/cgroup ]; then
+        MODE=fallback            # cgroup 只读(普通 docker run), systemd 无法挂载
+    else
+        MODE=systemd
+    fi
+fi
 
-# ---- 5. 交棒 ----
+# ---- 5. 用户覆盖了 CMD 的情况 ----
 if [ "$#" -gt 0 ]; then
     exec "$@"
 fi
 
-log " handing over to systemd (PID 1) ..."
-exec /sbin/init
+# ---- 6a. systemd 模式 ----
+if [ "$MODE" = "systemd" ]; then
+    systemctl enable ssh.service >/dev/null 2>&1 || true
+    systemctl enable tun.service >/dev/null 2>&1 || true
+    log " handing over to systemd (PID 1) ..."
+    exec /sbin/init
+fi
+
+# ---- 6b. 直跑模式(无 systemd): 容器必须保持健康, 平台终端/文件管理才可用 ----
+log "systemd 不可用(k8s/无特权环境), 进入直跑模式: tun 后台守护 + sshd 前台"
+
+# tun 读 /etc/tun/edge-ip 决定边缘连接协议(auto/4/6), 与 systemd 模式保持一致
+EDGE_ARGS=""
+case "$(cat /etc/tun/edge-ip 2>/dev/null)" in
+    4) EDGE_ARGS=" --edge-ip-version 4" ;;
+    6) EDGE_ARGS=" --edge-ip-version 6" ;;
+esac
+
+if [ -s /etc/tun/token ]; then
+    touch /var/log/tun.log
+    ( while :; do
+          CF_TUNNEL_TOKEN="$(cat /etc/tun/token)" "$TUN_BIN" run$EDGE_ARGS >> /var/log/tun.log 2>&1
+          printf '[entrypoint] tun 已退出, 5 秒后自动重启\n'
+          sleep 5
+      done ) &
+    log "tun 已启动(后台自动重启), 日志: /var/log/tun.log 或 docker logs"
+else
+    log "未配置 Tunnel Token (/etc/tun/token 为空), 跳过 tun"
+fi
+
+log "启动 sshd (前台, PID 1), SSH 监听 22 端口"
+exec /usr/sbin/sshd -D -e

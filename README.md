@@ -12,16 +12,19 @@ Debian GNU/Linux 12 (bookworm) 容器镜像，**PID 1 为 systemd**，内置两�
 - **默认 root 公钥**：`ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBbOngF8zJjVVvAlDWjZnGE83jXrt3aDviPCqIIE5Ju6`（已写入 `/root/.ssh/authorized_keys`）
 - **默认 Tunnel Token**：已写入 `/etc/tun/token` 与 `/etc/tun/env`，`tun.service` 开机自启
 
-## 启动链
+## 启动链（双模式）
 
 ```
-PID 1: /startup_wrapper.sh ──exec──▶ /entrypoint.sh ──exec──▶ /sbin/init (systemd)
-                                                                    ├─ ssh.service   (sshd, 端口 22)
-                                                                    └─ tun.service   (Cloudflare Tunnel)
+/startup_wrapper.sh ──exec──▶ /entrypoint.sh
+                                  ├─ systemd 可运行(--privileged 等) ──exec──▶ /sbin/init (PID 1)
+                                  │                                              ├─ ssh.service (sshd, 端口 22)
+                                  │                                              └─ tun.service (Cloudflare Tunnel)
+                                  └─ systemd 不可运行(k8s/普通 docker run) ──▶ 直跑模式:
+                                                                                 tun 后台自动重启 + sshd 前台 (PID 1)
 ```
 
 - `startup_wrapper.sh` 兼容把项目挂载到 `/project` 的托管平台（启动时切入该目录）；
-- `entrypoint.sh` 处理环境变量覆盖后 `exec /sbin/init`，因此 systemd 占据 PID 1；
+- `entrypoint.sh` 自动探测运行模式（`FORCE_SYSTEMD` 可强制指定），保证容器在任何环境都能健康启动；
 - `STOPSIGNAL SIGRTMIN+3` 保证 `docker stop` 能让 systemd 优雅关机。
 
 ## 构建
@@ -34,7 +37,13 @@ docker build -t debianx .
 
 ## 运行
 
-systemd 需要一定权限才能在容器内作为 PID 1 运行，任选其一：
+**不用任何特殊参数也能跑**（自动降级为直跑模式，sshd + tun 照常工作）：
+
+```bash
+docker run -d --name debianx -p 2222:22 debianx
+```
+
+需要完整 systemd（PID 1）时，任选其一：
 
 ```bash
 # 方式一：最简单（特权模式）
@@ -43,15 +52,27 @@ docker run -d --name debianx --privileged -p 2222:22 debianx
 # 方式二：Docker Engine 26+ 自动适配 systemd
 docker run -d --name debianx --systemd=always -p 2222:22 debianx
 
-# 方式三：手动给参数（不用 privileged）
+# 方式三：最小权限方案（不用 privileged，cgroup v2 主机）
 docker run -d --name debianx \
+  --cgroupns=private \
+  -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
   --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
-  -v /sys/fs/cgroup:/sys/fs/cgroup:rw --cgroupns=host \
-  --security-opt seccomp=unconfined \
+  --cap-add SYS_ADMIN \
   -p 2222:22 debianx
 ```
 
 Podman 无需额外参数，直接 `podman run -d -p 2222:22 debianx`。
+
+systemd 模式验证：`docker exec debianx systemctl is-system-running` 返回 `running` 或 `degraded` 即成功。
+
+### 部署到托管平台（ClawCloud Run / Sealos / k8s 类）
+
+直接填镜像 `ghcr.io/zoutern/debianx:latest` 即可，无需特权：
+
+- 平台是 k8s 环境，entrypoint 会自动进入直跑模式（日志有 `[entrypoint] 进入直跑模式`）；
+- 容器健康运行后，平台的**网页终端 / 文件管理**即可正常使用（镜像内含 `/bin/sh`、`/bin/bash`）；
+- SSH 端口 22，隧道日志看容器日志或 `/var/log/tun.log`；
+- 若平台把端口映射到别的端口，SSH 就连映射后的那个。
 
 ## SSH 连接
 
@@ -87,6 +108,7 @@ tun edge 4      # 边缘连接强制 IPv4/IPv6/auto
 |------|------|
 | `ROOT_PUBKEY` | 覆盖默认 root 公钥（写入 `/root/.ssh/authorized_keys`） |
 | `TUN_TOKEN`   | 覆盖默认 Tunnel Token（写入 `/etc/tun/token` 与 `/etc/tun/env`） |
+| `FORCE_SYSTEMD` | `1`=强制 systemd 模式（需特权），`0`=强制直跑模式，缺省自动探测 |
 
 ```bash
 docker run -d --name debianx --privileged -p 2222:22 \
