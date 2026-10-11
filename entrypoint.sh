@@ -69,8 +69,11 @@ if [ "$MODE" = "systemd" ]; then
     exec /sbin/init
 fi
 
-# ---- 6b. 直跑模式(无 systemd): 容器必须保持健康, 平台终端/文件管理才可用 ----
-log "systemd 不可用(k8s/无特权环境), 进入直跑模式: tun 后台守护 + sshd 前台"
+# ---- 6b. 直跑模式(无 systemd): PID 1 常驻不退出, 保证平台探测/终端/文件管理可用 ----
+log "systemd 不可用(k8s/无特权环境), 进入直跑模式: tun 后台守护 + sshd 自动重启"
+log "诊断: user=$(id -un 2>&1) sshd=$(command -v sshd 2>/dev/null || echo MISSING) cgroup=$(test -w /sys/fs/cgroup 2>/dev/null && echo rw || echo ro)"
+
+mkdir -p /run/sshd 2>/dev/null || log "警告: mkdir /run/sshd 失败(/run 只读?)"
 
 # tun 读 /etc/tun/edge-ip 决定边缘连接协议(auto/4/6), 与 systemd 模式保持一致
 EDGE_ARGS=""
@@ -80,7 +83,7 @@ case "$(cat /etc/tun/edge-ip 2>/dev/null)" in
 esac
 
 if [ -s /etc/tun/token ]; then
-    touch /var/log/tun.log
+    touch /var/log/tun.log 2>/dev/null || true
     ( while :; do
           CF_TUNNEL_TOKEN="$(cat /etc/tun/token)" "$TUN_BIN" run$EDGE_ARGS >> /var/log/tun.log 2>&1
           printf '[entrypoint] tun 已退出, 5 秒后自动重启\n'
@@ -91,5 +94,10 @@ else
     log "未配置 Tunnel Token (/etc/tun/token 为空), 跳过 tun"
 fi
 
-log "启动 sshd (前台, PID 1), SSH 监听 22 端口"
-exec /usr/sbin/sshd -D -e
+# sshd 崩溃也不许容器退出: 由 PID 1 循环托管, 错误直接进 stdout/docker logs
+log "启动 sshd (端口 22), 若异常退出将自动重启"
+while :; do
+    /usr/sbin/sshd -D -e 2>&1
+    log "sshd 已退出 (code=$?), 2 秒后重启 —— 错误见上一行"
+    sleep 2
+done
